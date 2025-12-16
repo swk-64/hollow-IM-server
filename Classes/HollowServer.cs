@@ -91,6 +91,15 @@ namespace Hollow_IM_Server.Classes
                     if (request == null)
                         break;
 
+                    switch (request.Action)
+                    {
+                        case "JOIN_CHAT":
+                            {
+                                request.Payload
+                                break;
+                            }
+                    }
+
                     // Broadcast to others
                     await BroadcastAsync($"Message from {client.Client.RemoteEndPoint}: {payload}");
 

@@ -8,6 +8,6 @@ namespace Hollow_IM_Server.Classes.Models
     internal class UserModel
     {
         [JsonPropertyName("username")]
-        public required string username { get; set; }
+        public required string Username { get; set; }
     }
 }

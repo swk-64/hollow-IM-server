@@ -7,13 +7,10 @@ namespace Hollow_IM_Server.Classes.Models
 {
     internal class UserDelta
     {
-        [JsonPropertyName("user_state")]
-        public required int UserState { get; set; }
+        [JsonPropertyName("change_type")]
+        public required bool ChangeType { get; set; }
 
-        [JsonPropertyName("users_to_remove")]
-        public List<UserModel>? UsersToRemove { get; set; }
-
-        [JsonPropertyName("user_to_add")]
-        public List<UserModel>? UsersToAdd { get; set; }
+        [JsonPropertyName("user_to_change")]
+        public required UserModel UserToChange { get; set; }
     }
 }

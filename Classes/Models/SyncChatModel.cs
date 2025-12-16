@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace Hollow_IM_Server.Classes.Models
 {
-    internal class ChatDelta
+    internal class SyncChatModel
     {
         [JsonPropertyName("last_messages_state")]
         public required int LastMessagesState { get; set; }
