@@ -6,8 +6,5 @@ namespace Hollow_IM_Server.Classes.Models
     {
         [JsonPropertyName("messages_state")]
         public required int MessagesState { get; set; }
-
-        [JsonPropertyName("users_state")]
-        public required int UsersState { get; set; }
     }
 }

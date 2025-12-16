@@ -24,45 +24,72 @@ namespace Hollow_IM_Server.Classes
             byte[] packet = ms.ToArray();
             return packet;
         }
-        public static void JoinChat(NetworkStream stream, bool status, ChatModel chat)
+        public static void JoinChat(NetworkStream stream, bool status, ChatModel? chat = null) // if status is false, the model won't be used anyway
         {
+            JsonElement payload;
+
             if (status)
             {
-                string chatStr = JsonSerializer.Serialize<ChatModel>(chat);
-                var chatJson = JsonDocument.Parse(chatStr);
-
-                var response = new Response { Action = "JOIN_CHAT", Status = true, Payload = chatJson.RootElement.Clone() };
-                var packet = BuildResponsePacket(response);
-                stream.Write(packet, 0, packet.Length);
+                string chatStr = JsonSerializer.Serialize(chat);
+                using var chatJson = JsonDocument.Parse(chatStr);
+                payload = chatJson.RootElement.Clone();
             }
             else
             {
-                var response = new Response { Action = "JOIN_CHAT", Status = false };
-                var packet = BuildResponsePacket(response);
-                stream.Write(packet, 0, packet.Length);
+                // Empty JSON object
+                using var emptyJson = JsonDocument.Parse("{}");
+                payload = emptyJson.RootElement.Clone();
             }
-            return;
-        }
-        public static void SendMessage(NetworkStream stream, bool status, MessageModel message)
-        {
-            string messageStr = JsonSerializer.Serialize<MessageModel>(message);
-            var messageJson = JsonDocument.Parse(messageStr);
+            var response = new Response { Action = "JOIN_CHAT", Status = status, Payload = payload };
 
-            var request = new Response { Action = "SEND_MESSAGE", Payload = messageJson.RootElement.Clone() };
-
-            var packet = BuildRequestPacket(request);
+            var packet = BuildResponsePacket(response);
             stream.Write(packet, 0, packet.Length);
 
             return;
         }
-        public static void SyncChat(NetworkStream stream, int messageState, int userState)
+        public static void SendMessage(NetworkStream stream, bool status, MessageModel? message = null) // if status is false, the model won't be used anyway
         {
-            string stateStr = JsonSerializer.Serialize<int>(messageState);
-            var stateJson = JsonDocument.Parse(stateStr);
+            JsonElement payload;
 
-            var request = new Models.Response { Action = "SYNC_CHAT", Payload = stateJson.RootElement.Clone() };
+            if (status)
+            {
+                string messageStr = JsonSerializer.Serialize(message);
+                using var messageJson = JsonDocument.Parse(messageStr);
+                payload = messageJson.RootElement.Clone();
+            }
+            else
+            {
+                // Empty JSON object
+                using var emptyJson = JsonDocument.Parse("{}");
+                payload = emptyJson.RootElement.Clone();
+            }
 
-            var packet = BuildRequestPacket(request);
+            var response = new Response { Action = "SEND_MESSAGE", Status = status, Payload = payload };
+
+            var packet = BuildResponsePacket(response);
+            stream.Write(packet, 0, packet.Length);
+
+            return;
+        }
+        public static void SyncChat(NetworkStream stream, bool status, SyncChatModel? diff = null) // if status is false, the model won't be used anyway
+        {
+            JsonElement payload;
+
+            if (status)
+            {
+                string diffStr = JsonSerializer.Serialize(diff);
+                using var diffJson = JsonDocument.Parse(diffStr);
+                payload = diffJson.RootElement.Clone();
+            }
+            else
+            {
+                // Empty JSON object
+                using var emptyJson = JsonDocument.Parse("{}");
+                payload = emptyJson.RootElement.Clone();
+            }
+            var request = new Response { Action = "SYNC_CHAT", Status = status, Payload = payload };
+
+            var packet = BuildResponsePacket(request);
             stream.Write(packet, 0, packet.Length);
 
             return;

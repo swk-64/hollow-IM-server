@@ -16,9 +16,6 @@ namespace Hollow_IM_Server.Classes.Models
         [JsonPropertyName("messages")]
         public required List<MessageModel> Messages { get; set; }
 
-        [JsonPropertyName("users_state")]
-        public required int UsersState { get; set; }
-
         [JsonPropertyName("users")]
         public required List<UserModel> Users { get; set; }
     }

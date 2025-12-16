@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 
-namespace Hollow_IM_Client.Classes.Models
+namespace Hollow_IM_Server.Classes.Models
 {
     internal class Request
     {

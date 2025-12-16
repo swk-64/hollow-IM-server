@@ -14,15 +14,17 @@ namespace Hollow_IM_Server.Classes
     {
 
         private readonly TcpListener server;
-        private readonly ConcurrentBag<TcpClient> connectedClients;
+        private readonly ConcurrentDictionary<Guid, ConnectedClient> connectedClients;
+        private readonly DBManager dbManager;
 
         // local host is "127.0.0.1"
-        public HollowServer(Int32 port, string address)
+        public HollowServer(Int32 port, string address, string connString)
         {
             var addr = IPAddress.Parse(address);
             server = new TcpListener(addr, port);
+            dbManager = new DBManager(connString);
 
-            connectedClients = new ConcurrentBag<TcpClient>();
+            connectedClients = new ConcurrentDictionary<Guid, ConnectedClient>();
         }
 
         public async Task StartListeningAsync()
@@ -33,16 +35,19 @@ namespace Hollow_IM_Server.Classes
                 Console.WriteLine("Waiting for a connection... ");
                 // Accept incoming client connection
                 TcpClient client = await server.AcceptTcpClientAsync();
+
+                ConnectedClient connected_client = new ConnectedClient { TcpClient = client, User = null };
+
                 Console.WriteLine("Connected!");
 
-                connectedClients.Add(client);
+                connectedClients.TryAdd(connected_client.Id, connected_client);
 
-                _ = HandleClientAsync(client);
+                _ = HandleClientAsync(connected_client);
 
             }
         }
 
-        private async Task<Response?> readResponseAsync(NetworkStream clientStream)
+        private async Task<Request?> readResponseAsync(NetworkStream clientStream)
         {
             byte[] prefixBuffer = new byte[4];
             using var cts1 = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -52,14 +57,14 @@ namespace Hollow_IM_Server.Classes
                 await clientStream!.ReadExactlyAsync(prefixBuffer, 0, 4, cts1.Token);
 
                 Int32 length = BitConverter.ToInt32(prefixBuffer, 0);
-                byte[] responseBuffer = new byte[length];
+                byte[] requestBuffer = new byte[length];
 
                 using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                await clientStream.ReadExactlyAsync(responseBuffer, 0, length, cts2.Token);
+                await clientStream.ReadExactlyAsync(requestBuffer, 0, length, cts2.Token);
 
-                string requestJson = Encoding.UTF8.GetString(responseBuffer);
+                string requestJson = Encoding.UTF8.GetString(requestBuffer);
 
-                return JsonSerializer.Deserialize<Response>(requestJson)!;
+                return JsonSerializer.Deserialize<Request>(requestJson)!;
 
             }
             catch (OperationCanceledException)
@@ -75,19 +80,17 @@ namespace Hollow_IM_Server.Classes
 
         }
 
-        private async Task HandleClientAsync(TcpClient client)
+        private async Task HandleClientAsync(ConnectedClient current_client)
         {
-            using NetworkStream stream = client.GetStream();
+            using NetworkStream stream = current_client.TcpClient.GetStream();
             //using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
 
             try
             {
-                await BroadcastAsync($"User joined: {client.Client.RemoteEndPoint}");
-
                 while (true)
                 {
-                    Response? request = await readResponseAsync(stream);
+                    Request? request = await readResponseAsync(stream);
                     if (request == null)
                         break;
 
@@ -95,20 +98,83 @@ namespace Hollow_IM_Server.Classes
                     {
                         case "JOIN_CHAT":
                             {
-                                request.Payload
+                                var user = request.Payload.Deserialize<UserModel>();
+
+                                if (string.IsNullOrWhiteSpace(user?.Username))
+                                {
+                                    HollowProtocol.JoinChat(stream, false);
+                                    break;
+                                }
+
+                                var chat = await dbManager.JoinChat(user);
+
+                                current_client.User = user;
+
+                                chat.Users.AddRange(connectedClients.Values.ToList().Select(c => c.User!));
+
+                                HollowProtocol.JoinChat(stream, true, chat);
+
+                                break;
+                            }
+                        case "SEND_MESSAGE":
+                            {
+                                //check if user set its name
+                                if (current_client.User == null)
+                                {
+                                    HollowProtocol.SendMessage(stream, false);
+                                    break;
+                                }
+
+                                var message = request.Payload.Deserialize<MessageModel>();
+
+                                //check if a message content isn't empty
+                                if (string.IsNullOrWhiteSpace(message?.Content))
+                                {
+                                    HollowProtocol.SendMessage(stream, false);
+                                    break;
+                                }
+
+                                //Validate message sender
+                                if (current_client.User != message?.User)
+                                {
+                                    HollowProtocol.SendMessage(stream, false);
+                                    break;
+                                }
+
+                                // Time validation isn't implemented
+
+                                await dbManager.SendMessage(message);
+
+                                HollowProtocol.SendMessage(stream, true, message);
+
+                                break;
+                            }
+                        case "SYNC_CHAT":
+                            {
+                                //check if user set its name
+                                if (current_client.User == null)
+                                {
+                                    HollowProtocol.SyncChat(stream, false);
+                                    break;
+                                }
+
+                                var state = request.Payload.Deserialize<ClientChatState>();
+
+                                if (state?.MessagesState == null)
+                                {
+                                    HollowProtocol.SyncChat(stream, false);
+                                    break;
+                                }
+
+                                var diff = await dbManager.SyncChat(state);
+
+                                diff.Users.AddRange(connectedClients.Values.ToList().Select(c => c.User!));
+
+                                HollowProtocol.SyncChat(stream, true, diff);
+
                                 break;
                             }
                     }
-
-                    // Broadcast to others
-                    await BroadcastAsync($"Message from {client.Client.RemoteEndPoint}: {payload}");
-
-                    // Example: send back an acknowledgment
-                    string response = $"Echo: {payload}";
-                    byte[] responseBytes = Encoding.UTF8.GetBytes(response);
-                    writer.Write(responseBytes.Length);
-                    writer.Write(responseBytes);
-
                     await stream.FlushAsync(); // ensure data is sent
                 }
             }
@@ -118,23 +184,9 @@ namespace Hollow_IM_Server.Classes
             }
             finally
             {
-                await BroadcastAsync($"User left: {client.Client.RemoteEndPoint}");
-                client.Close();
-            }
-        }
-        static async Task BroadcastAsync(string message)
-        {
-            foreach (var c in connectedClients)
-            {
-                try
-                {
-                    var writer = new BinaryWriter(c.GetStream(), Encoding.UTF8, leaveOpen: true);
-                    await writer.WriteLineAsync(message); // async write
-                }
-                catch
-                {
-                    // Ignore failed clients
-                }
+                current_client.TcpClient.Dispose();
+
+                connectedClients.TryRemove(current_client.Id, out _);
             }
         }
     }
