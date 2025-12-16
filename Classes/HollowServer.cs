@@ -12,13 +12,12 @@ namespace Hollow_IM_Server.Classes
 {
     internal class HollowServer
     {
-
         private readonly TcpListener server;
         private readonly ConcurrentDictionary<Guid, ConnectedClient> connectedClients;
         private readonly DBManager dbManager;
 
         // local host is "127.0.0.1"
-        public HollowServer(Int32 port, string address, string connString)
+        public HollowServer(int port, string address, string connString)
         {
             var addr = IPAddress.Parse(address);
             server = new TcpListener(addr, port);

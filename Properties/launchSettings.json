@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Hollow-IM-Server": {
+      "commandName": "Project",
+      "commandLineArgs": "runserver"
+    }
+  }
+}
