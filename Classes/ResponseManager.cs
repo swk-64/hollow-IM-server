@@ -1,11 +1,12 @@
-﻿using System.Net.Sockets;
+﻿using Hollow_IM_Server.Classes.Models;
+using System.Net.Security;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using Hollow_IM_Server.Classes.Models;
 
 namespace Hollow_IM_Server.Classes
 {
-    internal class HollowProtocol
+    internal class ResponseManager
     {
         private static Byte[] BuildResponsePacket(Response response)
         {
@@ -16,6 +17,7 @@ namespace Hollow_IM_Server.Classes
             Byte[] bytes = Encoding.UTF8.GetBytes(serialized);
 
             // Write Length Prefix (int32)
+
             writer.Write(bytes.Length);
 
             // Write Payload
@@ -24,7 +26,7 @@ namespace Hollow_IM_Server.Classes
             byte[] packet = ms.ToArray();
             return packet;
         }
-        public static void JoinChat(NetworkStream stream, bool status, ChatModel? chat = null) // if status is false, the model won't be used anyway
+        public static void JoinChat(SslStream stream, bool status, ChatModel? chat = null) // if status is false, the model won't be used anyway
         {
             JsonElement payload;
 
@@ -47,7 +49,7 @@ namespace Hollow_IM_Server.Classes
 
             return;
         }
-        public static void SendMessage(NetworkStream stream, bool status, MessageModel? message = null) // if status is false, the model won't be used anyway
+        public static void SendMessage(SslStream stream, bool status, MessageModel? message = null) // if status is false, the model won't be used anyway
         {
             JsonElement payload;
 
@@ -71,7 +73,7 @@ namespace Hollow_IM_Server.Classes
 
             return;
         }
-        public static void SyncChat(NetworkStream stream, bool status, SyncChatModel? diff = null) // if status is false, the model won't be used anyway
+        public static void SyncChat(SslStream stream, bool status, SyncChatModel? diff = null) // if status is false, the model won't be used anyway
         {
             JsonElement payload;
 

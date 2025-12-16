@@ -2,9 +2,12 @@
 using Npgsql;
 using System.Net;
 
-string connString = "Host=localhost;Port=5432;Database=hollow_im;Username=postgres;Password=1o52!Rv";
-int port = 25566;
-string address = "127.0.0.1";
+// CONFIG
+const string connString = "Host=localhost;Port=5432;Database=hollow_im;Username=postgres;Password=password";
+const string pkcs12Password = "password";
+const int port = 25566;
+const string address = "127.0.0.1";
+
 
 if (args.Length == 0)
 {
@@ -16,7 +19,7 @@ switch (args[0])
 {
     case "runserver":
         {
-            HollowServer server = new HollowServer(port, address, connString);
+            HollowServer server = new HollowServer(port, address, connString, pkcs12Password);
 
             await server.StartListeningAsync();
 

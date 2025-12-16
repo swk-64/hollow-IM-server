@@ -3,8 +3,11 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection.PortableExecutable;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 
@@ -15,15 +18,21 @@ namespace Hollow_IM_Server.Classes
         private readonly TcpListener server;
         private readonly ConcurrentDictionary<Guid, ConnectedClient> connectedClients;
         private readonly DBManager dbManager;
+        private readonly X509Certificate2 serverCert;
 
-        // local host is "127.0.0.1"
-        public HollowServer(int port, string address, string connString)
+        public HollowServer(int port, string address, string connString, string pkcs12Password)
         {
             var addr = IPAddress.Parse(address);
             server = new TcpListener(addr, port);
             dbManager = new DBManager(connString);
 
             connectedClients = new ConcurrentDictionary<Guid, ConnectedClient>();
+
+            string docsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string certPath = Path.Combine(docsPath, "hollow-IM", "certificates", "server.pfx");
+
+            serverCert = X509CertificateLoader.LoadPkcs12FromFile(certPath, pkcs12Password);
+
         }
 
         public async Task StartListeningAsync()
@@ -32,12 +41,12 @@ namespace Hollow_IM_Server.Classes
             while (true)
             {
                 Console.WriteLine("Waiting for a connection... ");
-                // Accept incoming client connection
+
                 TcpClient client = await server.AcceptTcpClientAsync();
 
                 ConnectedClient connected_client = new ConnectedClient { TcpClient = client, User = null };
 
-                Console.WriteLine("Connected!");
+                Console.WriteLine("A user connected!");
 
                 connectedClients.TryAdd(connected_client.Id, connected_client);
 
@@ -46,20 +55,20 @@ namespace Hollow_IM_Server.Classes
             }
         }
 
-        private async Task<Request?> readResponseAsync(NetworkStream clientStream)
+        private async Task<Request?> readResponseAsync(SslStream secured_stream)
         {
             byte[] prefixBuffer = new byte[4];
             using var cts1 = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
             try
             {
-                await clientStream!.ReadExactlyAsync(prefixBuffer, 0, 4, cts1.Token);
+                await secured_stream!.ReadExactlyAsync(prefixBuffer, 0, 4, cts1.Token);
 
                 Int32 length = BitConverter.ToInt32(prefixBuffer, 0);
                 byte[] requestBuffer = new byte[length];
 
                 using var cts2 = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                await clientStream.ReadExactlyAsync(requestBuffer, 0, length, cts2.Token);
+                await secured_stream.ReadExactlyAsync(requestBuffer, 0, length, cts2.Token);
 
                 string requestJson = Encoding.UTF8.GetString(requestBuffer);
 
@@ -81,15 +90,24 @@ namespace Hollow_IM_Server.Classes
 
         private async Task HandleClientAsync(ConnectedClient current_client)
         {
-            using NetworkStream stream = current_client.TcpClient.GetStream();
-            //using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
-            using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+            using var stream = current_client.TcpClient.GetStream();
+
+            using var secured_stream = new SslStream(stream, false);
+
+            await secured_stream.AuthenticateAsServerAsync(
+                serverCert, 
+                clientCertificateRequired: false, 
+                enabledSslProtocols: SslProtocols.Tls13, 
+                checkCertificateRevocation: false
+                );
+
+
 
             try
             {
                 while (true)
                 {
-                    Request? request = await readResponseAsync(stream);
+                    Request? request = await readResponseAsync(secured_stream);
                     if (request == null)
                         break;
 
@@ -101,7 +119,7 @@ namespace Hollow_IM_Server.Classes
 
                                 if (string.IsNullOrWhiteSpace(user?.Username))
                                 {
-                                    HollowProtocol.JoinChat(stream, false);
+                                    ResponseManager.JoinChat(secured_stream, false);
                                     break;
                                 }
 
@@ -111,7 +129,7 @@ namespace Hollow_IM_Server.Classes
 
                                 chat.Users.AddRange(connectedClients.Values.ToList().Select(c => c.User!));
 
-                                HollowProtocol.JoinChat(stream, true, chat);
+                                ResponseManager.JoinChat(secured_stream, true, chat);
 
                                 break;
                             }
@@ -120,7 +138,7 @@ namespace Hollow_IM_Server.Classes
                                 //check if user set its name
                                 if (current_client.User == null)
                                 {
-                                    HollowProtocol.SendMessage(stream, false);
+                                    ResponseManager.SendMessage(secured_stream, false);
                                     break;
                                 }
 
@@ -129,14 +147,14 @@ namespace Hollow_IM_Server.Classes
                                 //check if a message content isn't empty
                                 if (string.IsNullOrWhiteSpace(message?.Content))
                                 {
-                                    HollowProtocol.SendMessage(stream, false);
+                                    ResponseManager.SendMessage(secured_stream, false);
                                     break;
                                 }
 
                                 //Validate message sender
                                 if (current_client.User != message?.User)
                                 {
-                                    HollowProtocol.SendMessage(stream, false);
+                                    ResponseManager.SendMessage(secured_stream, false);
                                     break;
                                 }
 
@@ -144,7 +162,7 @@ namespace Hollow_IM_Server.Classes
 
                                 await dbManager.SendMessage(message);
 
-                                HollowProtocol.SendMessage(stream, true, message);
+                                ResponseManager.SendMessage(secured_stream, true, message);
 
                                 break;
                             }
@@ -153,7 +171,7 @@ namespace Hollow_IM_Server.Classes
                                 //check if user set its name
                                 if (current_client.User == null)
                                 {
-                                    HollowProtocol.SyncChat(stream, false);
+                                    ResponseManager.SyncChat(secured_stream, false);
                                     break;
                                 }
 
@@ -161,7 +179,7 @@ namespace Hollow_IM_Server.Classes
 
                                 if (state?.MessagesState == null)
                                 {
-                                    HollowProtocol.SyncChat(stream, false);
+                                    ResponseManager.SyncChat(secured_stream, false);
                                     break;
                                 }
 
@@ -169,12 +187,12 @@ namespace Hollow_IM_Server.Classes
 
                                 diff.Users.AddRange(connectedClients.Values.ToList().Select(c => c.User!));
 
-                                HollowProtocol.SyncChat(stream, true, diff);
+                                ResponseManager.SyncChat(secured_stream, true, diff);
 
                                 break;
                             }
                     }
-                    await stream.FlushAsync(); // ensure data is sent
+                    await secured_stream.FlushAsync(); // ensure data is sent
                 }
             }
             catch (IOException)
